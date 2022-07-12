@@ -4,23 +4,36 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+#include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
 #include "hardware/gpio.h"
 #include "hardware/adc.h"
+#include "hardware/uart.h"
 
+
+#define ADC_VREF 4.93
+#define ADC_RANGE (1 << 12)
+#define ADC_CONVERT (ADC_VREF / (ADC_RANGE - 1))
 
 static uint8_t ADDRESS = 0x60;
 static uint AUDIO_GATE_PIN = 27;
 static uint AUDIO_ENVELOPE_PIN = 26;
+static uint PUMP_START = 0x030;
+static uint PUMP_MAINTAIN = 0x100;
 
 void mcp4725_init();
-void write_to_dac(uint8_t val);
+void write_to_dac(uint val);
 
 
 int main() {
   const uint LED_PIN = PICO_DEFAULT_LED_PIN;
-  uint8_t adc_val;
+  uint pump_val;
+  uint adc_raw;
+
+  /// INITIALIZE STDIO FOR DEBUGGING ///
+  //stdio_init_all();
+  //printf("Beep boop, listening...\n");
 
 
   /// INITIALIZE I2C for pump level control ///
@@ -30,10 +43,10 @@ int main() {
   gpio_pull_up(PICO_DEFAULT_I2C_SDA_PIN);
   gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
 
-  // configure DAC
+  /// INITIALIZE DAC ///
   mcp4725_init();
 
-  // initialize ADC
+  /// INITIALIZE ADC ///
   adc_init();
 
   /// INITIALIZE GPIO LED BLINK ///
@@ -45,10 +58,15 @@ int main() {
   adc_gpio_init(AUDIO_ENVELOPE_PIN);
   adc_select_input(0);
   
+
+  write_to_dac(PUMP_START);
+  sleep_ms(5000);
   
+  
+  /// MAIN LOOP ///
   while (true) {
     
-    sleep_us(1);
+    sleep_ms(3);
     
     if(gpio_get(AUDIO_GATE_PIN)){
       gpio_put(LED_PIN, 1);
@@ -56,8 +74,15 @@ int main() {
       gpio_put(LED_PIN, 0);
     }
 
-    adc_val = (adc_read() & 0xFF00) >> 8;
-    write_to_dac(adc_val);
+    adc_raw = adc_read();
+    pump_val = PUMP_MAINTAIN + (adc_raw & 0x0FFF)/3;
+    if((pump_val & 0xF000) >= 1) pump_val = 0xFFF;
+    
+    write_to_dac(pump_val);
+
+
+    //printf("%d, dac: 0x%04x\n", (adc_raw & 0x0FFF)/4, pump_val);
+    //sleep_ms(1000);
     
   }
 
@@ -68,17 +93,17 @@ void mcp4725_init(){
   uint8_t buf[3];
   buf[0] = (0x02 << 5) & 0xE6; // write, don't power down
   buf[1] = 0xFF; // full power
-  buf[2] = 0xFF & 0xF8; // don't care about LSB for now
+  buf[2] = 0xFF & 0xF0; // don't care about LSB for now
   
   i2c_write_blocking(i2c_default, ADDRESS, buf, 3, false);
 
 }
 
-void write_to_dac(uint8_t val){
+void write_to_dac(uint val){
   uint8_t buf[3];
   buf[0] = (0x02 << 5) & 0xE6; // write, don't power down
-  buf[1] = val & 0xFF;
-  buf[2] = 0xFF & 0xF8;
+  buf[1] = (val >> 4) & 0xFF; // take MSB
+  buf[2] = val & 0xF0; // MSB are dropped by conversion to uint8_t
   
   i2c_write_blocking(i2c_default, ADDRESS, buf, 3, false);
 }

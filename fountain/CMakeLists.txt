@@ -8,4 +8,8 @@ target_compile_definitions(fountain PRIVATE
         PIN_DBG1=3)
 
 target_link_libraries(fountain PRIVATE pico_stdlib hardware_pio hardware_dma hardware_i2c hardware_adc)
+
+pico_enable_stdio_usb(fountain 1)
+pico_enable_stdio_uart(fountain 0)
+
 pico_add_extra_outputs(fountain)
